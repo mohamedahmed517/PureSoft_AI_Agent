@@ -244,8 +244,6 @@ def suggest_outfit(temp, rain):
 conversation_history = defaultdict(list)
 
 def gemini_chat(messages):
-    import requests
-    import os
 
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
@@ -260,10 +258,13 @@ def gemini_chat(messages):
     }
 
     try:
-        r = requests.post(url, json=payload, timeout=15)
-        r.raise_for_status()
-        result = r.json()
-        return result.get("candidates", [{}])[0].get("content", "عذرًا، مفيش رد من Gemini")
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("candidates", [{}])[0].get("content", "عذرًا، مفيش رد من Gemini")
+    except requests.exceptions.HTTPError as e:
+        print(f"Gemini HTTP Error: {e} – {response.text}")
+        return "عذرًا، كل النماذج مش شغالة دلوقتي"
     except Exception as e:
         print(f"Gemini Error: {e}")
         return "عذرًا، كل النماذج مش شغالة دلوقتي"
@@ -398,5 +399,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
 
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
