@@ -12,7 +12,7 @@ from flask import Flask, request, jsonify
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # ==================== OpenAI Config ====================
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -259,9 +259,9 @@ def openai_chat(messages):
 @app.route("/")
 def home():
     return jsonify({
-        "message": "Weather + Shopping + Vision AI شغال 100%!",
-        "endpoints": ["/api/chat"],
-        "features": ["طقس", "توصيات لبس ومنتجات", "تحليل صور", "تسوق"]
+        "message": "PureSoft AI Backend شغال 100%",
+        "api": "/api/chat",
+        "frontend": "https://mohamedahmed517.github.io/PureSoft_Website/"
     })
 
 @app.route("/api/chat", methods=["POST"])
@@ -371,4 +371,5 @@ def chat():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+
     app.run(host="0.0.0.0", port=port, debug=False)
