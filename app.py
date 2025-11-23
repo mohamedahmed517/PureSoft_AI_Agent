@@ -243,6 +243,24 @@ def suggest_outfit(temp, rain):
 
 conversation_history = defaultdict(list)
 
+def gemini_chat(messages):
+    import requests
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    url = "https://api.gemini.ai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
+    payload = {
+        "model": "gemini-2.0-flash",
+        "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
+        "temperature": 0.7
+    }
+    try:
+        r = requests.post(url, json=payload, headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return "عذرًا، كل النماذج مش شغالة دلوقتي"
+
 def openai_chat(messages):
     try:
         response = client.chat.completions.create(
@@ -253,8 +271,8 @@ def openai_chat(messages):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"OpenAI Error: {e}")
-        return "عذرًا، فيه مشكلة دلوقتي. حاول تاني بعد شوية!"
+        return gemini_chat(messages)
+
 
 @app.route("/")
 def home():
