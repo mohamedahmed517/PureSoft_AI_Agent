@@ -250,12 +250,13 @@ def gemini_chat(messages):
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
-    prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+    prompt_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
 
     payload = {
-        "prompt": prompt,
         "temperature": 0.7,
-        "maxOutputTokens": 1024
+        "maxOutputTokens": 1024,
+        "candidateCount": 1,
+        "prompt": {"text": prompt_text}
     }
 
     try:
@@ -397,4 +398,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
 
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
