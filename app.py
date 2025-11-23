@@ -244,26 +244,25 @@ def suggest_outfit(temp, rain):
 conversation_history = defaultdict(list)
 
 def gemini_chat(messages):
-
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.0:generateText?key={GEMINI_API_KEY}"
 
     prompt_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
 
     payload = {
+        "prompt": {"text": prompt_text},
         "temperature": 0.7,
-        "maxOutputTokens": 1024,
         "candidateCount": 1,
-        "prompt": {"text": prompt_text}
+        "topP": 0.95
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        return data.get("candidates", [{}])[0].get("content", "عذرًا، مفيش رد من Gemini")
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        return data.get("candidates", [{}])[0].get("output", "")
     except requests.exceptions.HTTPError as e:
-        print(f"Gemini HTTP Error: {e} – {response.text}")
+        print(f"Gemini HTTP Error: {e} – {r.text}")
         return "عذرًا، كل النماذج مش شغالة دلوقتي"
     except Exception as e:
         print(f"Gemini Error: {e}")
@@ -399,6 +398,7 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
 
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
 
 
