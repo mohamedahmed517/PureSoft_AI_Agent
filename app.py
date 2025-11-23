@@ -245,18 +245,24 @@ conversation_history = defaultdict(list)
 
 def gemini_chat(messages):
     import requests
+    import os
+
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-    url = "https://api.gemini.ai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GEMINI_API_KEY}"}
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+
+    prompt = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+
     payload = {
-        "model": "gemini-2.0-flash",
-        "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
-        "temperature": 0.7
+        "prompt": prompt,
+        "temperature": 0.7,
+        "maxOutputTokens": 1024
     }
+
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=15)
+        r = requests.post(url, json=payload, timeout=15)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        result = r.json()
+        return result.get("candidates", [{}])[0].get("content", "عذرًا، مفيش رد من Gemini")
     except Exception as e:
         print(f"Gemini Error: {e}")
         return "عذرًا، كل النماذج مش شغالة دلوقتي"
@@ -391,3 +397,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
 
     app.run(host="0.0.0.0", port=port, debug=False)
+
