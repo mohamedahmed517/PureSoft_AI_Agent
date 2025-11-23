@@ -1,0 +1,6 @@
+Flask
+Flask-CORS
+openai
+gunicorn
+python-dotenv
+requests
