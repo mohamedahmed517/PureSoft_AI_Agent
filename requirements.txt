@@ -3,6 +3,5 @@ flask-cors
 python-dotenv
 pandas
 requests
-huggingface_hub
-pillow
+openai
 gunicorn
