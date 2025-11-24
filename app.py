@@ -8,22 +8,24 @@ from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
-from huggingface_hub import InferenceClient
+from openai import OpenAI
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== Hugging Face (Llama 3.2 Vision) ====================
-HF_TOKEN = os.environ.get("HF_TOKEN")
-if not HF_TOKEN:
-    raise ValueError("HF_TOKEN مش موجود! اعمله من https://huggingface.co/settings/tokens")
+# ==================== Groq (مجاني 100% بدون كريديت كارد) ====================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY مش موجود! روح https://console.groq.com/keys وخد واحد ببلاش")
 
-client = InferenceClient(
-    model="meta-llama/Llama-3.2-11B-Vision-Instruct",
-    token=HF_TOKEN
+client = OpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
 )
+
+MODEL = "gemma-2-27b-it"
 
 # ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -94,41 +96,23 @@ def suggest_outfit(temp, rain):
 
 conversation_history = defaultdict(list)
 
-def llama_chat(system_prompt, user_message, image_b64=None):
+def groq_chat(messages):
     try:
-        messages = [{"role": "system", "content": system_prompt}]
-        
-        # Add conversation history
-        for role, text in conversation_history[get_user_ip()]:
-            messages.append({"role": role, "content": text})
-
-        # User message with optional image
-        user_content = [{"type": "text", "text": user_message or "فيه صورة مرفوعة"}]
-        if image_b64:
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}
-            })
-
-        messages.append({"role": "user", "content": user_content})
-
-        # Call Llama 3.2 Vision
-        response = client.chat_completion(
+        response = client.chat.completions.create(
+            model=MODEL,
             messages=messages,
             max_tokens=1024,
-            temperature=0.7,
-            stream=False
+            temperature=0.7
         )
         return response.choices[0].message.content.strip()
-
     except Exception as e:
-        print(f"Llama Error: {e}")
-        return "يا ريس المودل نام شوية، حاول تاني بعد دقيقة!"
+        print(f"Groq Error: {e}")
+        return "المودل نايم شوية، جرب تاني بعد ثواني!"
 
 @app.route("/")
 def home():
     return jsonify({
-        "message": "PureSoft AI Backend شغال 100% (Llama 3.2 Vision)",
+        "message": "PureSoft AI Backend شغال 100% (Groq + Gemma-2-27B)",
         "api": "/api/chat",
         "frontend": "https://mohamedahmed517.github.io/PureSoft_Website/"
     })
@@ -172,7 +156,8 @@ def chat():
         if not user_message and not image_b64:
             return jsonify({"error": "لازم تبعت رسالة أو صورة"}), 400
 
-        # نفس الـ System Prompt بالظبط
+        history = conversation_history[user_ip]
+
         system_prompt = f"""
         أنت مساعد مصري ذكي وودود جدًا، بتتكلم عامية مصرية طبيعية 100%، ممتع وصريح وبتفهم اليوزر من نص كلمة.
         
@@ -197,7 +182,18 @@ def chat():
         8. اتكلم مصري، مفيش فصحى ولا "يا باشا".
         """
 
-        reply = llama_chat(system_prompt, user_message, image_b64)
+        messages = [{"role": "system", "content": system_prompt}]
+
+        for role, text in history:
+            messages.append({"role": role, "content": text})
+
+        user_text = user_message or "فيه صورة مرفوعة"
+        if image_b64:
+            user_text += "\n[اليوزر رفع صورة، حللها كويس واربطها بالطقس والمنتجات]"
+
+        messages.append({"role": "user", "content": user_text})
+
+        reply = groq_chat(messages)
 
         conversation_history[user_ip].append(("user", user_message or "[صورة]"))
         conversation_history[user_ip].append(("assistant", reply))
