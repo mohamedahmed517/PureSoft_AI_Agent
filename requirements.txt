@@ -9,3 +9,4 @@ itsdangerous
 Jinja2
 MarkupSafe
 click
+gunicorn
