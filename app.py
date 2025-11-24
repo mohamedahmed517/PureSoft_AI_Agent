@@ -89,30 +89,53 @@ def fetch_weather(lat, lon):
 
 conversation_history = defaultdict(list)
 
-def gemini_chat(system_prompt, user_message, image_b64=None):
+def gemini_chat(user_message, image_b64=None):
     try:
         user_ip = get_user_ip()
 
-        history = []
-        if len(conversation_history[user_ip]) > 0:
-            for role, text in conversation_history[user_ip]:
-                history.append({"role": "user" if role == "user" else "model", "parts": [text]})
+        products_text = "المنتجات المتاحة حاليًا (لازم ترشح من دول بس وما تطلعش حاجة برا القايمة):\n"
+        for _, row in CSV_DATA.iterrows():
+            name = str(row.get('name') or row.get('اسم المنتج') or row.get('product_name') or row[0]).strip()
+            price = row.get('price') or row.get('السعر') or row[1]
+            cat = str(row.get('category') or row.get('الكاتيجوري') or row.get('القسم') or row[2]).strip()
+            id_ = row.get('id') or row.get('product_id') or row[3]
+            products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
 
-        if len(conversation_history[user_ip]) == 0:
-            history = [{"role": "user", "parts": [system_prompt]}]
+        today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
 
-        chat = MODEL.start_chat(history=history)
+        full_message = f"""
+        اليوزر في {city} والنهاردة الجو {today_temp}°C
+        
+        {products_text}
+        
+        المحادثة السابقة:
+        {chr(10).join([f"{'أنت' if role == 'assistant' else 'اليوزر'}: {text}" for role, text in conversation_history[user_ip][-10:]])}
+        
+        اليوزر بيقول دلوقتي: {user_message or "فيه صورة مرفوعة"}
+        
+        لازم ترد عامية مصرية نظيفة، ولو طلب لبس أو منتجات → رشح من القايمة اللي فوق بس، وكل منتج بالشكل ده بالظبط:
+        تيشيرت كم طويل قطن ابيض
+        السعر: 130 جنيه
+        الكاتيجوري: لبس ربيعي
+        اللينك: https://afaq-stores.com/product-details/1015
+        
+        (سطر فاضي بين كل منتج ومنتج، وما تكررش منتج مرتين)
+        
+        لو رفع صورة → حللها كويس ورشح من القايمة اللي فوق.
+        لو سألك "عامل إيه؟" → قول "كويس الحمد لله، وانت؟"
+        ما تستخدمش ألقاب زي يا باشا أو يا وحش.
+        احفظ كل حاجة يقولها عن نفسه.
+        """.strip()
 
         if image_b64:
             img_bytes = base64.b64decode(image_b64)
             img = Image.open(io.BytesIO(img_bytes))
-            user_input = user_message or "حلل الصورة دي كويس جدًا ورشح لبس أو منتجات مناسبة من القايمة اللي عندك"
-            response = chat.send_message([user_input, img])
+            response = MODEL.generate_content([full_message, img])
         else:
-            user_input = user_message or "هاي"
-            response = chat.send_message(user_input)
+            response = MODEL.generate_content(full_message)
 
-        return response.text.strip()
+        reply = response.text.strip()
+        return reply
 
     except Exception as e:
         print(f"Gemini Error: {e}")
@@ -130,12 +153,11 @@ def chat():
         if not location:
             return jsonify({"error": "مش عارف أحدد مكانك"}), 400
 
+        global city, weather_data
         city = location["city"]
         weather_data = fetch_weather(location["lat"], location["lon"])
         if not weather_data:
             return jsonify({"error": "مشكلة في جلب الطقس"}), 500
-
-        today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
 
         user_message = request.form.get("message", "").strip()
         image_file = request.files.get("image")
@@ -150,39 +172,7 @@ def chat():
         if not user_message and not image_b64:
             return jsonify({"error": "لازم تبعت رسالة أو صورة"}), 400
 
-        products_text = "المنتجات المتاحة حاليًا (لازم ترشح من دول بس):\n"
-        for _, row in CSV_DATA.iterrows():
-            name = row['product_name_ar'].strip()
-            price = row['sell_price']
-            cat = row['category'].strip()
-            id_ = row['product_id']
-            products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
-
-        system_prompt = f"""
-        أنت مساعد مصري ذكي جدًا وودود، بتتكلم عامية مصرية سليمة 100% بدون أي خطأ إملائي أو نحوي.
-        اليوزر في {city} والنهاردة الجو حوالي {today_temp}°C.
-
-        {products_text}
-
-        قواعد صارمة جدًا:
-        1. أول رد بس: رحب بسيط + قول الجو النهاردة في {city} مرة واحدة.
-        2. لو طلب لبس أو منتجات → رشح من القايمة اللي فوق فقط، وكل منتج بالشكل ده بالظبط:
-           تيشيرت كم طويل قطن ابيض
-           السعر: 130 جنيه
-           الكاتيجوري: لبس ربيعي
-           اللينك: https://afaq-stores.com/product-details/1015
-
-           → سطر فاضي بين كل منتج ومنتج، وما تكررش منتج مرتين.
-        3. لو رفع صورة → حللها بدقة ورشح منتجات من القايمة فقط.
-        4. اتكلم عامية مصرية نظيفة، بدون ألقاب زي "يا باشا" أو "يا وحش".
-        5. لو قال "عامل إيه؟" → قول: "كويس الحمد لله، وانت؟"
-        6. احفظ كل حاجة يقولها عن نفسه وخد بالك منها في الترشيحات.
-        7. ردودك طبيعية، ذكية، ومباشرة.
-
-        ابدأ دلوقتي.
-        """
-
-        reply = gemini_chat(system_prompt, user_message, image_b64)
+        reply = gemini_chat(user_message, image_b64)
 
         conversation_history[user_ip].append(("user", user_message or "[صورة]"))
         conversation_history[user_ip].append(("assistant", reply))
@@ -200,4 +190,5 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
 
