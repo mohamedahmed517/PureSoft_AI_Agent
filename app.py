@@ -2,7 +2,6 @@ import os
 import re
 import base64
 import requests
-import openai
 import pandas as pd
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -15,14 +14,16 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== OpenAI Config ====================
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-if not OPENAI_API_KEY:
-    raise ValueError("OPENAI_API_KEY مش موجود في الـ environment variables!")
+# ==================== xAI Grok Config ====================
+GROK_API_KEY = os.environ.get("GROK_API_KEY")
+if not GROK_API_KEY:
+    raise ValueError("GROK_API_KEY مش موجود في الـ environment variables!")
 
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
+from xai_sdk import Client
 
-# ==================== CSV Data (المنتجات) ====================
+client = Client(api_key=GROK_API_KEY)
+
+# ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 csv_path = os.path.join(BASE_DIR, 'products.csv')
 CSV_DATA = pd.read_csv(csv_path)
@@ -89,15 +90,27 @@ def suggest_outfit(temp, rain):
 
 conversation_history = defaultdict(list)
 
-def openai_chat(messages):
+def grok_chat(messages):
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            temperature=0.7,
-            max_tokens=1024
-        )
-        return response.choices[0].message.content.strip()
+        chat = client.chat.create(model="grok-4")
+        for msg in messages:
+            if msg["role"] == "system":
+                chat.append(system(msg["content"]))
+            elif msg["role"] == "user":
+                if isinstance(msg["content"], list):
+                    text_content = next((item["text"] for item in msg["content"] if item["type"] == "text"), "")
+                    image_b64_url = next((item["image_url"]["url"] for item in msg["content"] if item["type"] == "image_url"), None)
+                    if image_b64_url:
+                        chat.append(user(text_content, image(image_b64_url)))
+                    else:
+                        chat.append(user(text_content))
+                else:
+                    chat.append(user(msg["content"]))
+            elif msg["role"] == "assistant":
+                chat.append(assistant(msg["content"]))
+        
+        response = chat.sample(temperature=0.7, max_tokens=1024)
+        return response.content.strip()
     except Exception as e:
         return "المودل مش شغال حاليا!"
 
@@ -196,7 +209,7 @@ def chat():
 
         messages.append({"role": "user", "content": user_content})
 
-        reply = openai_chat(messages)
+        reply = grok_chat(messages)
 
         conversation_history[user_ip].append(("user", user_message or "[صورة]"))
         conversation_history[user_ip].append(("assistant", reply))
@@ -216,6 +229,4 @@ def chat():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-
     app.run(host="0.0.0.0", port=port, debug=False)
-
