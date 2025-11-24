@@ -152,10 +152,10 @@ def chat():
 
         products_text = "المنتجات المتاحة حاليًا (لازم ترشح من دول بس):\n"
         for _, row in CSV_DATA.iterrows():
-            name = row['name'].strip()
-            price = row['price']
+            name = row['product_name_ar'].strip()
+            price = row['sell_price']
             cat = row['category'].strip()
-            id_ = row['id']
+            id_ = row['product_id']
             products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
 
         system_prompt = f"""
@@ -200,3 +200,4 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
