@@ -3,4 +3,5 @@ Flask-CORS
 openai
 gunicorn
 python-dotenv
+pandas
 requests
