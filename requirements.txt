@@ -3,5 +3,6 @@ flask-cors
 python-dotenv
 pandas
 requests
-openai
+google-generativeai
+Pillow
 gunicorn
