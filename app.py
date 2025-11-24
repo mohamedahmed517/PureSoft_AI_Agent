@@ -25,7 +25,7 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-MODEL = "gemma-2-27b-it"
+MODEL = "llama-3.1-70b-versatile"
 
 # ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -214,3 +214,4 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
