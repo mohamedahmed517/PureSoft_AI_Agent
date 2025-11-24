@@ -3,6 +3,7 @@ import re
 import base64
 import requests
 import pandas as pd
+from xai_sdk import Client
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
@@ -18,8 +19,6 @@ CORS(app, resources={r"/api/*": {"origins": "*"}})
 GROK_API_KEY = os.environ.get("GROK_API_KEY")
 if not GROK_API_KEY:
     raise ValueError("GROK_API_KEY مش موجود في الـ environment variables!")
-
-from xai_sdk import Client
 
 client = Client(api_key=GROK_API_KEY)
 
@@ -61,8 +60,8 @@ def get_location(ip: str):
             if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
                 return None
             return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
-        except:
-            return None
+        except Exception as e:
+            return e
 
 def fetch_weather(lat, lon):
     start = date.today()
@@ -77,8 +76,8 @@ def fetch_weather(lat, lon):
         r = requests.get(url, timeout=15)
         r.raise_for_status()
         return r.json()["daily"]
-    except:
-        return None
+    except Exception as e:
+        return e
 
 def suggest_outfit(temp, rain):
     if rain > 2.0: return "مطر – خُد شمسية"
@@ -112,7 +111,7 @@ def grok_chat(messages):
         response = chat.sample(temperature=0.7, max_tokens=1024)
         return response.content.strip()
     except Exception as e:
-        return "المودل مش شغال حاليا!"
+        return e
 
 @app.route("/")
 def home():
@@ -224,7 +223,7 @@ def chat():
         })
 
     except Exception as e:
-        print(f"خطأ عام: {e}")
+        print(e)
         return jsonify({"error": "فيه مشكلة، حاول تاني"}), 500
 
 if __name__ == "__main__":
