@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
+from xai_sdk.chat import user, system, assistant, image
 
 load_dotenv()
 
@@ -52,16 +53,9 @@ def get_location(ip: str):
         if d.get("error") or not d.get("city") or not d.get("latitude") or not d.get("longitude"):
             raise ValueError("بيانات ناقصة")
         return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
-    except:
-        try:
-            r = requests.get(f"https://ipwho.is/{ip}", timeout=8)
-            r.raise_for_status()
-            d = r.json()
-            if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
-                return None
-            return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
-        except Exception as e:
-            return e
+    except Exception as e:
+        print(f"Location error: {e}")
+        return None
 
 def fetch_weather(lat, lon):
     start = date.today()
@@ -77,7 +71,8 @@ def fetch_weather(lat, lon):
         r.raise_for_status()
         return r.json()["daily"]
     except Exception as e:
-        return e
+        print(f"Weather error: {e}")
+        return None
 
 def suggest_outfit(temp, rain):
     if rain > 2.0: return "مطر – خُد شمسية"
@@ -92,26 +87,31 @@ conversation_history = defaultdict(list)
 def grok_chat(messages):
     try:
         chat = client.chat.create(model="grok-4")
+
+        sys_msg = next((m for m in messages if m["role"] == "system"), None)
+        if sys_msg:
+            chat.append(system(sys_msg["content"]))
+
         for msg in messages:
-            if msg["role"] == "system":
-                chat.append(system(msg["content"]))
-            elif msg["role"] == "user":
+            if msg["role"] == "user":
                 if isinstance(msg["content"], list):
-                    text_content = next((item["text"] for item in msg["content"] if item["type"] == "text"), "")
-                    image_b64_url = next((item["image_url"]["url"] for item in msg["content"] if item["type"] == "image_url"), None)
-                    if image_b64_url:
-                        chat.append(user(text_content, image(image_b64_url)))
+                    text = next((c["text"] for c in msg["content"] if c["type"] == "text"), "")
+                    img_url = next((c["image_url"]["url"] for c in msg["content"] if c["type"] == "image_url"), None)
+                    if img_url:
+                        chat.append(user(text or "حلل الصورة دي", image(img_url)))
                     else:
-                        chat.append(user(text_content))
+                        chat.append(user(text))
                 else:
                     chat.append(user(msg["content"]))
             elif msg["role"] == "assistant":
                 chat.append(assistant(msg["content"]))
-        
+
         response = chat.sample(temperature=0.7, max_tokens=1024)
         return response.content.strip()
+
     except Exception as e:
-        return e
+        print(f"Grok Error: {e}")
+        return f"المودل مش شغال حالياً! حاول تاني بعد شوية."
 
 @app.route("/")
 def home():
@@ -162,38 +162,28 @@ def chat():
 
         history = conversation_history[user_ip]
 
-        messages = [
-                    {"role": "system", "content": f"""
+        messages = [{"role": "system", "content": f"""
         أنت مساعد مصري ذكي وودود جدًا، بتتكلم عامية مصرية طبيعية 100%، ممتع وصريح وبتفهم اليوزر من نص كلمة.
-
+        
         المنتجات اللي عندنا (لازم ترشح منهم فقط لو طلب أي حاجة للبيع):
         {CSV_DATA}
-
+        
         توقعات الطقس في {city} لمدة 14 يوم:
         {forecast_text}
-
+        
         ★★★★★ قواعد صارمة جدًا ★★★★★
         1. أول رد بس: رحب بسيط + قول المدينة والطقس مرة واحدة بشكل طبيعي.
         2. بعدها ما تعيدش الطقس أبدًا إلا لو سأل صراحة.
         3. لو رفع صورة → حللها كويس (لبس، بشرة، شعر، مكان، جو...) ورشح منتجات مناسبة.
-        4. ★★★ أهم حاجة ★★★
-        كل ما ترشح أي منتج (واحد أو أكتر)، لازم تكتب كل منتج بالشكل ده بالظبط وما ينفعش تغير الترتيب أبدًا:
-
-        🛍️ **اسم المنتج**
-        💰 السعر: xxx جنيه
-        📂 الكاتيجوري: كذا
-        🔗 اللينك: https://afaq-stores.com/product-details/{{id}}
-
-        مثال:
-        🛍️ **جاكيت جلد اسود تقيل مبطن فرو**
-        💰 السعر: 720 جنيه
-        📂 الكاتيجوري: لبس شتوي
-        🔗 اللينك: https://afaq-stores.com/product-details/1001
-
-        5. لو فيه عرض أو خصم → اذكره بوضوح جنب السعر.
-        6. لو اليوزر عايز يقعد في البيت → اقترح نشاطات بيتية وما تحفزش على الخروج أبدًا.
-        7. ردودك دايمًا طبيعية جدًا زي البني آدمين، ممتعة، ومفيدة.
-        8. اتكلم مصري 100%، مفيش فصحى ولا ألقاب زي "يا باشا" أو "يا فندم".
+        4. كل ما ترشح منتج لازم يكون بالشكل ده بالظبط:
+           🛍️ **اسم المنتج**
+           💰 السعر: xxx جنيه
+           📂 الكاتيجوري: كذا
+           🔗 اللينك: https://afaq-stores.com/product-details/{{id}}
+        5. لو فيه عرض → اذكره بوضوح.
+        6. لو عايز يقعد في البيت → اقترح نشاطات بيتية بس.
+        7. ردودك طبيعية وممتعة 100%.
+        8. اتكلم مصري، مفيش فصحى ولا "يا باشا".
         """}]
 
         for role, text in history:
@@ -216,15 +206,15 @@ def chat():
             conversation_history[user_ip] = conversation_history[user_ip][-10:]
 
         return jsonify({
-            "reply": reply,
+            "reply": str(reply),
             "city": city,
             "type": "chat",
             "has_image": bool(image_b64)
         })
 
     except Exception as e:
-        print(e)
-        return jsonify({"error": "فيه مشكلة، حاول تاني"}), 500
+        print(f"خطأ عام: {e}")
+        return jsonify({"error": "فيه مشكلة، حاول تاني بعد شوية"}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
