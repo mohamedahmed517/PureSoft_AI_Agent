@@ -3,19 +3,19 @@ import re
 import base64
 import requests
 import pandas as pd
+from openai import OpenAI
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
-from openai import OpenAI
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== Groq (مجاني 100% بدون كريديت كارد) ====================
+# ==================== Groq ====================
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY مش موجود! روح https://console.groq.com/keys وخد واحد ببلاش")
@@ -25,7 +25,7 @@ client = OpenAI(
     base_url="https://api.groq.com/openai/v1"
 )
 
-MODEL = "llama-3.1-70b-versatile"
+MODEL = "llama-3.3-70b-versatile"
 
 # ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -214,4 +214,5 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
 
