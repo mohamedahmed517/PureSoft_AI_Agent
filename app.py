@@ -24,7 +24,7 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL = genai.GenerativeModel(
-    'gemini-1.5-flash',
+    'gemini-2.0-flash',
     generation_config={"temperature": 0.7, "max_output_tokens": 1024}
 )
 
@@ -227,3 +227,4 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
