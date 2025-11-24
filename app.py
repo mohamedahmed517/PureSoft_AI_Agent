@@ -89,32 +89,6 @@ def suggest_outfit(temp, rain):
 
 conversation_history = defaultdict(list)
 
-def gemini_chat(messages):
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-    url = f"https://generativelanguage.googleapis.com/v1beta2/models/gemini-2.5-pro:generateText?key={GEMINI_API_KEY}"
-
-    prompt_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
-
-    payload = {
-        "prompt": {"text": prompt_text},
-        "temperature": 0.7,
-        "candidateCount": 1,
-        "topP": 0.95
-    }
-
-    try:
-        r = requests.post(url, json=payload, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        return data.get("candidates", [{}])[0].get("output", "").strip()
-    except requests.exceptions.HTTPError as e:
-        print(f"Gemini HTTP Error: {e} – {r.text}")
-        return "عذرًا يا معلم، جيميناي نايم دلوقتي"
-    except Exception as e:
-        print(f"Gemini Error: {e}")
-        return "النماذج كلها واقعة يا برنس"
-
 def openai_chat(messages):
     try:
         response = client.chat.completions.create(
@@ -125,8 +99,7 @@ def openai_chat(messages):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return gemini_chat(messages)
-
+        return "المودل مش شغال حاليا!"
 
 @app.route("/")
 def home():
@@ -245,3 +218,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
 
     app.run(host="0.0.0.0", port=port, debug=False)
+
