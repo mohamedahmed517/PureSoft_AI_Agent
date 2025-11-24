@@ -1,7 +1,11 @@
 Flask
 Flask-CORS
-openai
-gunicorn
 python-dotenv
 pandas
 requests
+xai-sdk
+Werkzeug
+itsdangerous
+Jinja2
+MarkupSafe
+click
