@@ -17,7 +17,7 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== Gemini API ====================
+# ==================== Gemini 2.0 Flash ====================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY مش موجود! روح https://aistudio.google.com/app/apikey وخد واحد ببلاش")
@@ -100,16 +100,18 @@ conversation_history = defaultdict(list)
 def gemini_chat(system_prompt, user_message, image_b64=None):
     try:
         user_ip = get_user_ip()
-        chat = MODEL.start_chat()
+        history = []
+        if len(conversation_history[user_ip]) > 0:
+            for role, text in conversation_history[user_ip]:
+                if role == "user":
+                    history.append({"role": "user", "parts": [text]})
+                else:
+                    history.append({"role": "model", "parts": [text]})
 
         if len(conversation_history[user_ip]) == 0:
-            chat.send_message(system_prompt)
+            history = [{"role": "user", "parts": [system_prompt]}]
 
-        for role, text in conversation_history[user_ip]:
-            if role == "user":
-                chat.send_message(text)
-            else:
-                chat.send_message(text, role="model")
+        chat = MODEL.start_chat(history=history)
 
         if image_b64:
             img_bytes = base64.b64decode(image_b64)
@@ -129,7 +131,7 @@ def gemini_chat(system_prompt, user_message, image_b64=None):
 @app.route("/")
 def home():
     return jsonify({
-        "message": "PureSoft AI شغال 100% مع Gemini 1.5 Flash",
+        "message": "PureSoft AI شغال 100% مع Gemini 2.0 Flash (ببلاش للأبد)",
         "api": "/api/chat",
         "frontend": "https://mohamedahmed517.github.io/PureSoft_Website/"
     })
@@ -227,4 +229,3 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
