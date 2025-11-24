@@ -5,10 +5,10 @@ import base64
 import requests
 import pandas as pd
 from PIL import Image
+import google.generativeai as genai
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
-import google.generativeai as genai
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
 
@@ -25,7 +25,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL = genai.GenerativeModel(
     'gemini-2.0-flash',
-    generation_config={"temperature": 0.7, "max_output_tokens": 1024}
+    generation_config={"temperature": 0.7, "max_output_tokens": 2048}
 )
 
 # ==================== CSV Data ====================
@@ -87,26 +87,16 @@ def fetch_weather(lat, lon):
         print(f"Weather error: {e}")
         return None
 
-def suggest_outfit(temp, rain):
-    if rain > 2.0: return "مطر – خُد شمسية"
-    if temp < 10: return "برد جدًا – جاكيت تقيل"
-    if temp < 18: return "بارد – جاكيت خفيف"
-    if temp < 26: return "معتدل – تيشيرت وجينز"
-    if temp < 32: return "دافئ – تيشيرت خفيف"
-    return "حر – شورت ومياه كتير"
-
 conversation_history = defaultdict(list)
 
 def gemini_chat(system_prompt, user_message, image_b64=None):
     try:
         user_ip = get_user_ip()
+
         history = []
         if len(conversation_history[user_ip]) > 0:
             for role, text in conversation_history[user_ip]:
-                if role == "user":
-                    history.append({"role": "user", "parts": [text]})
-                else:
-                    history.append({"role": "model", "parts": [text]})
+                history.append({"role": "user" if role == "user" else "model", "parts": [text]})
 
         if len(conversation_history[user_ip]) == 0:
             history = [{"role": "user", "parts": [system_prompt]}]
@@ -116,7 +106,7 @@ def gemini_chat(system_prompt, user_message, image_b64=None):
         if image_b64:
             img_bytes = base64.b64decode(image_b64)
             img = Image.open(io.BytesIO(img_bytes))
-            user_input = user_message or "حلل الصورة دي كويس جدًا ووصفها بالتفصيل"
+            user_input = user_message or "حلل الصورة دي كويس جدًا ورشح لبس أو منتجات مناسبة من القايمة اللي عندك"
             response = chat.send_message([user_input, img])
         else:
             user_input = user_message or "هاي"
@@ -130,11 +120,7 @@ def gemini_chat(system_prompt, user_message, image_b64=None):
 
 @app.route("/")
 def home():
-    return jsonify({
-        "message": "PureSoft AI شغال 100% مع Gemini 2.0 Flash (ببلاش للأبد)",
-        "api": "/api/chat",
-        "frontend": "https://mohamedahmed517.github.io/PureSoft_Website/"
-    })
+    return "PureSoft AI Backend شغال 100% مع Gemini 2.0 Flash"
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -149,18 +135,7 @@ def chat():
         if not weather_data:
             return jsonify({"error": "مشكلة في جلب الطقس"}), 500
 
-        today = date.today()
-        forecast_lines = []
-        for i in range(min(14, len(weather_data["time"]))):
-            d = (today + timedelta(days=i)).strftime("%d-%m")
-            t_max = weather_data["temperature_2m_max"][i]
-            t_min = weather_data["temperature_2m_min"][i]
-            temp = round((t_max + t_min) / 2, 1)
-            rain = weather_data["precipitation_sum"][i]
-            outfit = suggest_outfit(temp, rain)
-            forecast_lines.append(f"{d}: {temp}°C – {outfit}")
-
-        forecast_text = "\n".join(forecast_lines)
+        today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
 
         user_message = request.form.get("message", "").strip()
         image_file = request.files.get("image")
@@ -169,43 +144,42 @@ def chat():
             if not image_file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                 return jsonify({"error": "نوع الصورة مش مدعوم"}), 400
             if image_file.content_length > 5 * 1024 * 1024:
-                return jsonify({"error": "الصورة كبيرة أوي (حد أقصى 5 ميجا)"}), 400
+                return jsonify({"error": "الصورة كبيرة أوي"}), 400
             image_b64 = base64.b64encode(image_file.read()).decode('utf-8')
 
         if not user_message and not image_b64:
             return jsonify({"error": "لازم تبعت رسالة أو صورة"}), 400
 
+        products_text = "المنتجات المتاحة حاليًا (لازم ترشح من دول بس):\n"
+        for _, row in CSV_DATA.iterrows():
+            name = row['name'].strip()
+            price = row['price']
+            cat = row['category'].strip()
+            id_ = row['id']
+            products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
+
         system_prompt = f"""
-        أنت مساعد مصري ذكي جدًا وودود، بتتكلم عامية مصرية سليمة وطبيعية 100% بدون أي خطأ إملائي أو نحوي.
-        تفهم من نص كلمة وبترد بطريقة ممتعة ومباشرة وذكية.
+        أنت مساعد مصري ذكي جدًا وودود، بتتكلم عامية مصرية سليمة 100% بدون أي خطأ إملائي أو نحوي.
+        اليوزر في {city} والنهاردة الجو حوالي {today_temp}°C.
 
-        معلومات مهمة عندك دلوقتي:
-        - اليوزر في مدينة: {city}
-        - توقعات الطقس لمدة 14 يوم:
-        {forecast_text}
+        {products_text}
 
-        المنتجات اللي عندنا (ترشح منهم فقط لو طلب حاجة للبيع):
-        {CSV_DATA.to_string(index=False)}
+        قواعد صارمة جدًا:
+        1. أول رد بس: رحب بسيط + قول الجو النهاردة في {city} مرة واحدة.
+        2. لو طلب لبس أو منتجات → رشح من القايمة اللي فوق فقط، وكل منتج بالشكل ده بالظبط:
+           تيشيرت كم طويل قطن ابيض
+           السعر: 130 جنيه
+           الكاتيجوري: لبس ربيعي
+           اللينك: https://afaq-stores.com/product-details/1015
 
-        ★★★★★ قواعد صارمة جدًا لازم تتبعها ★★★★★
-        1. أول رد بس: رحب بسيط طبيعي + اذكر المدينة والجو النهاردة مرة واحدة فقط (مثلاً: "النهاردة في {city} الجو معتدل حلو أوي").
-        2. بعدها متكررش الطقس أبدًا إلا لو سألك صراحة.
-        3. متسألش أبدًا "عنوانك فين؟" أو "بتسألني كتير ليه؟" أو "بتعمل إيه؟" من غير سبب واضح.
-        4. لو سألك "عامل إيه؟" → رد: "كويس الحمد لله، وانت؟"
-        5. لو رفع صورة → حللها بدقة جدًا (شكل اللبس، لون البشرة، الشعر، المكان، الجو، المود...) ورشح منتجات مناسبة من اللي عندنا فقط.
-        6. اتكلم عامية مصرية صح 100%، بدون ألقاب زي "يا باشا"، "يا وحش"، "يا ريس"، "يا معلم"، "يا برو"، "يا كبير"، إلخ.
-        7. لما ترشح منتجات → ارشح كل منتج مرة واحدة فقط بالشكل ده بالظبط:
-           🛍️ **اسم المنتج**
-           💰 السعر: xxx جنيه
-           📂 الكاتيجوري: كذا
-           🔗 اللينك: https://afaq-stores.com/product-details/{{id}}
+           → سطر فاضي بين كل منتج ومنتج، وما تكررش منتج مرتين.
+        3. لو رفع صورة → حللها بدقة ورشح منتجات من القايمة فقط.
+        4. اتكلم عامية مصرية نظيفة، بدون ألقاب زي "يا باشا" أو "يا وحش".
+        5. لو قال "عامل إيه؟" → قول: "كويس الحمد لله، وانت؟"
+        6. احفظ كل حاجة يقولها عن نفسه وخد بالك منها في الترشيحات.
+        7. ردودك طبيعية، ذكية، ومباشرة.
 
-           → مفيش تكرار أبدًا في نفس الرد. لو طلب غيرهم → جيبله غيرهم.
-        8. احفظ كل حاجة اليوزر يقولها عن نفسه (مثل: بحب الأسود، أنا مهندس، بشرتي فاتحة، إلخ) وخد بالك منها في كل ردودك القادمة في نفس الجلسة.
-        9. لو اليوزر عمل ريفريش للصفحة → الذاكرة هتتمسح تلقائي وتبدأ من جديد (عادي جدًا).
-        10. ردودك دايمًا طبيعية، ذكية، ومباشرة، وممتعة.
-
-        ابدأ دلوقتي وخليك طبيعي جدًا.
+        ابدأ دلوقتي.
         """
 
         reply = gemini_chat(system_prompt, user_message, image_b64)
@@ -216,16 +190,13 @@ def chat():
             conversation_history[user_ip] = conversation_history[user_ip][-20:]
 
         return jsonify({
-            "reply": str(reply),
-            "city": city,
-            "type": "chat",
-            "has_image": bool(image_b64)
+            "reply": reply,
+            "city": city
         })
 
     except Exception as e:
-        print(f"خطأ عام: {e}")
-        return jsonify({"error": "فيه مشكلة، حاول تاني بعد شوية"}), 500
+        print(f"Error: {e}")
+        return jsonify({"error": "فيه مشكلة، جرب تاني"}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
