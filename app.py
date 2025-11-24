@@ -53,9 +53,17 @@ def get_location(ip: str):
         if d.get("error") or not d.get("city") or not d.get("latitude") or not d.get("longitude"):
             raise ValueError("بيانات ناقصة")
         return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
-    except Exception as e:
-        print(f"Location error: {e}")
-        return None
+    except:
+        try:
+            r = requests.get(f"https://ipwho.is/{ip}", timeout=8)
+            r.raise_for_status()
+            d = r.json()
+            if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
+                return None
+            return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
+        except Exception as e:
+            print(f"Location error: {e}")
+            return None
 
 def fetch_weather(lat, lon):
     start = date.today()
@@ -219,3 +227,4 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
