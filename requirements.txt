@@ -1,12 +1,8 @@
 Flask
-Flask-CORS
+flask-cors
 python-dotenv
 pandas
 requests
-xai-sdk
-Werkzeug
-itsdangerous
-Jinja2
-MarkupSafe
-click
+huggingface_hub
+pillow
 gunicorn
