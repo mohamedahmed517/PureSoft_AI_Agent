@@ -1,12 +1,14 @@
 import os
 import re
+import io
 import base64
 import requests
 import pandas as pd
-from openai import OpenAI
+from PIL import Image
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
+import google.generativeai as genai
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
 
@@ -15,17 +17,16 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== Groq ====================
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY مش موجود! روح https://console.groq.com/keys وخد واحد ببلاش")
+# ==================== Gemini API ====================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY مش موجود! روح https://aistudio.google.com/app/apikey وخد واحد ببلاش")
 
-client = OpenAI(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
+genai.configure(api_key=GEMINI_API_KEY)
+MODEL = genai.GenerativeModel(
+    'gemini-1.5-flash-exp-03-25',
+    generation_config={"temperature": 0.7, "max_output_tokens": 1024}
 )
-
-MODEL = "llama-3.3-70b-versatile"
 
 # ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -96,23 +97,39 @@ def suggest_outfit(temp, rain):
 
 conversation_history = defaultdict(list)
 
-def groq_chat(messages):
+def gemini_chat(system_prompt, user_message, image_b64=None):
     try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=messages,
-            max_tokens=1024,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
+        user_ip = get_user_ip()
+        chat = MODEL.start_chat()
+
+        if len(conversation_history[user_ip]) == 0:
+            chat.send_message(system_prompt)
+
+        for role, text in conversation_history[user_ip]:
+            if role == "user":
+                chat.send_message(text)
+            else:
+                chat.send_message(text, role="model")
+
+        if image_b64:
+            img_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(img_bytes))
+            user_input = user_message or "حلل الصورة دي كويس جدًا ووصفها بالتفصيل"
+            response = chat.send_message([user_input, img])
+        else:
+            user_input = user_message or "هاي"
+            response = chat.send_message(user_input)
+
+        return response.text.strip()
+
     except Exception as e:
-        print(f"Groq Error: {e}")
-        return "المودل نايم شوية، جرب تاني بعد ثواني!"
+        print(f"Gemini Error: {e}")
+        return "ثواني بس وهرجعلك تاني!"
 
 @app.route("/")
 def home():
     return jsonify({
-        "message": "PureSoft AI Backend شغال 100% (Groq + Gemma-2-27B)",
+        "message": "PureSoft AI شغال 100% مع Gemini 1.5 Flash",
         "api": "/api/chat",
         "frontend": "https://mohamedahmed517.github.io/PureSoft_Website/"
     })
@@ -156,49 +173,44 @@ def chat():
         if not user_message and not image_b64:
             return jsonify({"error": "لازم تبعت رسالة أو صورة"}), 400
 
-        history = conversation_history[user_ip]
-
         system_prompt = f"""
-        أنت مساعد مصري ذكي وودود جدًا، بتتكلم عامية مصرية طبيعية 100%، ممتع وصريح وبتفهم اليوزر من نص كلمة.
-        
-        المنتجات اللي عندنا (لازم ترشح منهم فقط لو طلب أي حاجة للبيع):
-        {CSV_DATA.to_string(index=False)}
-        
-        توقعات الطقس في {city} لمدة 14 يوم:
+        أنت مساعد مصري ذكي جدًا وودود، بتتكلم عامية مصرية سليمة وطبيعية 100% بدون أي خطأ إملائي أو نحوي.
+        تفهم من نص كلمة وبترد بطريقة ممتعة ومباشرة وذكية.
+
+        معلومات مهمة عندك دلوقتي:
+        - اليوزر في مدينة: {city}
+        - توقعات الطقس لمدة 14 يوم:
         {forecast_text}
-        
-        ★★★★★ قواعد صارمة جدًا ★★★★★
-        1. أول رد بس: رحب بسيط + قول المدينة والطقس مرة واحدة بشكل طبيعي.
-        2. بعدها ما تعيدش الطقس أبدًا إلا لو سأل صراحة.
-        3. لو رفع صورة → حللها كويس (لبس، بشرة، شعر، مكان، جو...) ورشح منتجات مناسبة.
-        4. كل ما ترشح منتج لازم يكون بالشكل ده بالظبط:
-           🛍️ **اسم المنتج**
-           💰 السعر: xxx جنيه
-           📂 الكاتيجوري: كذا
-           🔗 اللينك: https://afaq-stores.com/product-details/{{id}}
-        5. لو فيه عرض → اذكره بوضوح.
-        6. لو عايز يقعد في البيت → اقترح نشاطات بيتية بس.
-        7. ردودك طبيعية وممتعة 100%.
-        8. اتكلم مصري، مفيش فصحى ولا "يا باشا".
+
+        المنتجات اللي عندنا (ترشح منهم فقط لو طلب حاجة للبيع):
+        {CSV_DATA.to_string(index=False)}
+
+        ★★★★★ قواعد صارمة جدًا لازم تتبعها ★★★★★
+        1. أول رد بس: رحب بسيط طبيعي + اذكر المدينة والجو النهاردة مرة واحدة فقط (مثلاً: "النهاردة في {city} الجو معتدل حلو أوي").
+        2. بعدها متكررش الطقس أبدًا إلا لو سألك صراحة.
+        3. متسألش أبدًا "عنوانك فين؟" أو "بتسألني كتير ليه؟" أو "بتعمل إيه؟" من غير سبب واضح.
+        4. لو سألك "عامل إيه؟" → رد: "كويس الحمد لله، وانت؟"
+        5. لو رفع صورة → حللها بدقة جدًا (شكل اللبس، لون البشرة، الشعر، المكان، الجو، المود...) ورشح منتجات مناسبة من اللي عندنا فقط.
+        6. اتكلم عامية مصرية صح 100%، بدون ألقاب زي "يا باشا"، "يا وحش"، "يا ريس"، "يا معلم"، "يا برو"، "يا كبير"، إلخ.
+        7. لما ترشح منتجات → ارشح كل منتج مرة واحدة فقط بالشكل ده بالظبط:
+           تيشيرت كم طويل قطن ابيض
+           السعر: 130 جنيه
+           الكاتيجوري: لبس ربيعي
+           اللينك: https://afaq-stores.com/product-details/1015
+           → مفيش تكرار أبدًا في نفس الرد. لو طلب غيرهم → جيبله غيرهم.
+        8. احفظ كل حاجة اليوزر يقولها عن نفسه (مثل: بحب الأسود، أنا مهندس، بشرتي فاتحة، إلخ) وخد بالك منها في كل ردودك القادمة في نفس الجلسة.
+        9. لو اليوزر عمل ريفريش للصفحة → الذاكرة هتتمسح تلقائي وتبدأ من جديد (عادي جدًا).
+        10. ردودك دايمًا طبيعية، ذكية، ومباشرة، وممتعة.
+
+        ابدأ دلوقتي وخليك طبيعي جدًا.
         """
 
-        messages = [{"role": "system", "content": system_prompt}]
-
-        for role, text in history:
-            messages.append({"role": role, "content": text})
-
-        user_text = user_message or "فيه صورة مرفوعة"
-        if image_b64:
-            user_text += "\n[اليوزر رفع صورة، حللها كويس واربطها بالطقس والمنتجات]"
-
-        messages.append({"role": "user", "content": user_text})
-
-        reply = groq_chat(messages)
+        reply = gemini_chat(system_prompt, user_message, image_b64)
 
         conversation_history[user_ip].append(("user", user_message or "[صورة]"))
         conversation_history[user_ip].append(("assistant", reply))
-        if len(conversation_history[user_ip]) > 10:
-            conversation_history[user_ip] = conversation_history[user_ip][-10:]
+        if len(conversation_history[user_ip]) > 20:
+            conversation_history[user_ip] = conversation_history[user_ip][-20:]
 
         return jsonify({
             "reply": str(reply),
@@ -214,5 +226,3 @@ def chat():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
-
