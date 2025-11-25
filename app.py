@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
-from flask_cors import CORS
+from flask_cans import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import date, timedelta
@@ -59,8 +59,7 @@ def get_location(ip: str):
             if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
                 return None
             return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
-        except Exception as e:
-            print(f"Location error: {e}")
+        except:
             return None
 
 def fetch_weather(lat, lon):
@@ -75,17 +74,17 @@ def fetch_weather(lat, lon):
 
 # ==================== Memory ====================
 conversation_history = defaultdict(list)
-user_disabled_products = set()
 
 # ==================== Gemini Chat ====================
 def gemini_chat(user_message="", image_b64=None):
     try:
         user_ip = get_user_ip()
-        location = get_location(user_ip)
+        location = get_location(user_ip) or {"city": "القاهرة", "lat": 30.04, "lon": 31.23}
         city = location["city"]
         today_temp = fetch_weather(location["lat"], location["lon"])
 
-        products_text = "المنتجات المتاحة (لازم ترشح من دول بس لو اليوزر عايز لبس):\n"
+        # بناء نص المنتجات
+        products_text = "المنتجات المتاحة (لازم تنسخ الاسم من دول بالحرف من غير أي تغيير أو اختراع):\n"
         for _, row in CSV_DATA.iterrows():
             name = str(row.get('name') or row.get('اسم المنتج') or row.get('product_name') or row.iloc[0]).strip()
             price = row.get('price') or row.get('السعر') or row.iloc[1]
@@ -93,30 +92,22 @@ def gemini_chat(user_message="", image_b64=None):
             id_ = row.get('id') or row.get('product_id') or row.iloc[3] if len(row)>3 else "unknown"
             products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | ID: {id_}\n"
 
-        clothing_keywords = ["لبس", "تيشرت", "بنطلون", "جاكيت", "قميص", "هودي", "كارديجان", "كوتشي", "ترينج", "جينز", "رشح", "عايز", "زي", "نفس", "شبه", "شبه", "اقترح"]
-
-        user_text_lower = user_message.lower() if user_message else ""
-        is_clothing_request = any(word in user_text_lower for word in clothing_keywords)
-
-                full_message = f"""
+        full_message = f"""
 أنت شاب مصري بتتكلم عامية مصرية طبيعية وودودة جدًا، بتعرف تحلل صور وبتفهم في الموضة كويس.
 
 الجو في {city} النهاردة: {today_temp}°C
 
-المنتجات اللي عندك (لازم تنسخ الاسم بالحرف من دول، من غير أي تغيير أو تلخيص أو اختراع):
-
+المنتجات اللي عندك:
 {products_text}
 
-≫≫ قواعد لا تُكسر أبدًا – لازم تتبعها بالحرف ≪≪
+المحادثة السابقة:
+{chr(10).join([t for _, t in conversation_history[user_ip][-10:]])}
 
-- لو اليوزر عايز لبس أو رفع صورة لبس → لازم ترشح منتجات من القايمة فوق بالتنسيق ده بالظبط، وتنسخ الاسم زي ما هو مكتوب في القايمة حتى لو الصورة مختلفة شوية.
+اليوزر بيقول: {user_message or "فيه صورة مرفوعة"}
 
-ممنوع منعًا باتًا:
-- تكتب "جاكيت جينز" أو "تيشيرت أبيض" أو أي اسم مختصر
-- تختصر أو تعيد صياغة اسم المنتج
-- تخترع اسم جديد
+قواعد صارمة جدًا – ممنوع تخالفها أبدًا:
 
-لازم تكتب الاسم زي ما هو في القايمة، مثال:
+لو اليوزر بيسأل عن لبس أو رفع صورة لبس (كلمات زي: رشح، عايز، نفس، زي، جاكيت، تيشرت، سكارف...) → لازم ترشح منتجات من القايمة فوق بالتنسيق ده بالظبط وتنسخ الاسم زي ما هو مكتوب في القايمة من غير أي تلخيص أو اختراع:
 
 سكارف كشمير طويل
 السعر: 290 جنيه
@@ -133,43 +124,23 @@ def gemini_chat(user_message="", image_b64=None):
 الكاتيجوري: لبس خريفي
 اللينك: https://afaq-stores.com/product-details/1011
 
-≫≫ أمثلة إجبارية لازم تقلدها بالظبط ≪≪
+ممنوع منعًا باتًا:
+- تكتب "جاكيت جينز" أو "تيشيرت أبيض" أو أي اسم مختصر
+- تعيد صياغة أو تلخص اسم المنتج
+- تخترع اسم جديد حتى لو الصورة مختلفة
 
-لو اليوزر قال "عايز جاكيت":
-سكارف كشمير طويل
-السعر: 290 جنيه
-الكاتيجوري: لبس خريفي
-اللينك: https://afaq-stores.com/product-details/1014
+لو اليوزر رفع صورة بس أو بيسأل حاجة عادية → حلل الصورة ورد طبيعي من غير منتجات خالص.
 
-كارديجان صوف خفيف بيج
-السعر: 320 جنيه
-الكاتيجوري: لبس خريفي
-اللينك: https://afaq-stores.com/product-details/1012
+لو رفع صورة + كلام عن لبس → حلل الصورة الأول وبعدين رشح بالتنسيق أعلاه.
 
-لو رفع صورة جاكيت جينز وقال "عايز زي ده":
-الله ينور الجاكيت ده شيك أوي، تعالى أوريك حاجات قريبة منه عندنا
-
-سكارف كشمير طويل
-السعر: 290 جنيه
-الكاتيجوري: لبس خريفي
-اللينك: https://afaq-stores.com/product-details/1014
-
-كارديجان صوف خفيف بيج
-السعر: 320 جنيه
-الكاتيجوري: لبس خريفي
-اللينك: https://afaq-stores.com/product-details/1012
-
-≫≫ قواعد عامة ≪≪
-- لو اليوزر مش بيسأل عن لبس أو رفع صورة عادية → حلل الصورة ورد طبيعي من غير منتجات
-- لو رفع صورة + كلام عن لبس → حلل الصورة الأول وبعدين رشح بالتنسيق أعلاه
-- لو رفع صورة بس → ابدأ بـ "ثانية بس أشوف الصورة..."
 - ردك عامية مصرية طبيعية 100%
-- متستخدمش إيموجي
-- متعترفش إنك بوت
+- متستخدمش إيموجي نهائي
+- متعترفش إنك بوت أبدًا
+- لو فيه صورة → ابدأ بـ "ثانية بس أشوف الصورة..."
 
 رد دلوقتي.
 """.strip()
-        
+
         if image_b64:
             img_bytes = base64.b64decode(image_b64)
             img = Image.open(io.BytesIO(img_bytes))
@@ -222,4 +193,3 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
-
