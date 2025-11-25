@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 from PIL import Image
 import google.generativeai as genai
-from flask_cans import CORS
+from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import date, timedelta
@@ -193,3 +193,4 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
