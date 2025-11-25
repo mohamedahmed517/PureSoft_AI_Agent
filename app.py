@@ -5,10 +5,10 @@ import base64
 import requests
 import pandas as pd
 from PIL import Image
-import google.generativeai as genai
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
+import google.generativeai as genai
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
 
@@ -25,7 +25,7 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 MODEL = genai.GenerativeModel(
     'gemini-2.0-flash',
-    generation_config={"temperature": 0.7, "max_output_tokens": 2048}
+    generation_config={"temperature": 0.8, "max_output_tokens": 2048}
 )
 
 # ==================== CSV Data ====================
@@ -88,12 +88,17 @@ def fetch_weather(lat, lon):
         return None
 
 conversation_history = defaultdict(list)
+user_disabled_products = set()
+last_message_time = {}
+user_mood_asked = set()
 
 def gemini_chat(user_message, image_b64=None):
     try:
         user_ip = get_user_ip()
 
-        products_text = "المنتجات المتاحة حاليًا (لازم ترشح من دول بس وما تطلعش حاجة برا القايمة):\n"
+        today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
+
+        products_text = "المنتجات المتاحة (ترشح من دول بس وما تطلعش حاجة برا القايمة):\n"
         for _, row in CSV_DATA.iterrows():
             name = str(row.get('name') or row.get('اسم المنتج') or row.get('product_name') or row[0]).strip()
             price = row.get('price') or row.get('السعر') or row[1]
@@ -101,30 +106,42 @@ def gemini_chat(user_message, image_b64=None):
             id_ = row.get('id') or row.get('product_id') or row[3]
             products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
 
-        today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
+        show_products = user_ip not in user_disabled_products
+
+        mood_prompt = ""
+        if user_ip not in user_mood_asked and len(conversation_history[user_ip]) == 0:
+            mood_prompt = "إبدأ المحادثة بسؤاله: \"مزاجك إيه النهاردة؟ عايز لبس شيك ولا كاجوال؟ \" وبعدين كمل عادي."
 
         full_message = f"""
-        اليوزر في {city} والنهاردة الجو {today_temp}°C
+        أنت شاب مصري اسمه "عبدالله" (أو عبدو)، صاحب محل لبس شيك في {city}، بتتكلم عامية مصرية خفيفة وطبيعية جدًا، مرح، ودود، وبتفهم في الموضة.
         
-        {products_text}
+        الجو في {city} النهاردة: {today_temp}°C
+        
+        لو اليوزر قال أي حاجة زي "مش عايز منتجات" أو "بس بشوف" أو "مش هاشتري دلوقتي" → متعرضش أي منتج نهائي لحد ما يقول صراحة "رشحلي" أو "عايز اشتري".
+        
+        المنتجات المتاحة (ترشح من دول بس لو مسموح):
+        {products_text if show_products else "اليوزر حاليًا مش عايز يشوف منتجات"}
         
         المحادثة السابقة:
-        {chr(10).join([f"{'أنت' if role == 'assistant' else 'اليوزر'}: {text}" for role, text in conversation_history[user_ip][-10:]])}
+        {chr(10).join([text for role, text in conversation_history[user_ip][-10:]])}
         
         اليوزر بيقول دلوقتي: {user_message or "فيه صورة مرفوعة"}
         
-        لازم ترد عامية مصرية نظيفة، ولو طلب لبس أو منتجات → رشح من القايمة اللي فوق بس، وكل منتج بالشكل ده بالظبط:
-        تيشيرت كم طويل قطن ابيض
-        السعر: 130 جنيه
-        الكاتيجوري: لبس ربيعي
-        اللينك: https://afaq-stores.com/product-details/1015
+        ≫≫ تعليمات مهمة جدًا ≪≪
+        {mood_prompt}
         
-        (سطر فاضي بين كل منتج ومنتج، وما تكررش منتج مرتين)
+        - لو رفع صورة وهو بيسال عن منتج في نفس الوقت→ قوله: "ثانية بس أشوف الصورة... الله ينور! طب لو عندك صورة تانية للي في دماغك ابعتها وأنا أجيبلك زيها بالظبط"
+        - "لو رفع صورة من غير ميقول حاجة حلل الصورة كويس وقوله تفاصيل الصورة"
+        - لو قال "غالي" أو "مش هينفع" → اعمل فصال مصري: "طب قوللي ميزانيتك كام وأنا أجيبلك حاجة تليق بيك" أو "خلاص لو هتاخد اتنين نعملك خصم حلو"
+        - لو محتار بين اتنين → قوله: "طب أنا لو مكانك هاخد كذا، لأنه بيلبس أكتر وبيخسس كمان"
+        - لو سكت كتير → ردود زي: "لسه معايا؟" أو "غمزت ولا لسه بتفكر؟"
+        - لو أول مرة يكلمني → اسأله عن مزاجه.
+        - ماتقولش "أنت:" أبدًا، خليك طبيعي 100%.
+        - متعترفش إنك بوت أبدًا.
+        - ردودك مرحة، خفيفة، ومصرية جدًا.
+        - متردش بي ايموجي على اي رسالة
         
-        لو رفع صورة → حللها كويس ورشح من القايمة اللي فوق.
-        لو سألك "عامل إيه؟" → قول "كويس الحمد لله، وانت؟"
-        ما تستخدمش ألقاب زي يا باشا أو يا وحش.
-        احفظ كل حاجة يقولها عن نفسه.
+        رد دلوقتي بطريقة طبيعية كأنك بتكلم زبون دخل المحل.
         """.strip()
 
         if image_b64:
@@ -143,7 +160,7 @@ def gemini_chat(user_message, image_b64=None):
 
 @app.route("/")
 def home():
-    return "PureSoft AI Backend شغال 100% مع Gemini 2.0 Flash"
+    return "PureSoft AI Backend شغال 100% مع Gemini 2.0 Flash + عبدالله البائع المصري الأسطوري 🔥"
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -172,12 +189,21 @@ def chat():
         if not user_message and not image_b64:
             return jsonify({"error": "لازم تبعت رسالة أو صورة"}), 400
 
+        lower_msg = user_message.lower()
+        if any(phrase in lower_msg for phrase in ["مش عايز", "مفيش حاجة", "مش هاشتري", "بس بشوف", "مش عايز منتجات"]):
+            user_disabled_products.add(user_ip)
+        if any(phrase in lower_msg for phrase in ["رشحلي", "عايز اشتري", "وريني", "عايز حاجة", "ايه عندك"]):
+            user_disabled_products.discard(user_ip)
+            user_mood_asked.add(user_ip)
+
         reply = gemini_chat(user_message, image_b64)
 
         conversation_history[user_ip].append(("user", user_message or "[صورة]"))
         conversation_history[user_ip].append(("assistant", reply))
-        if len(conversation_history[user_ip]) > 20:
-            conversation_history[user_ip] = conversation_history[user_ip][-20:]
+        if len(conversation_history[user_ip]) > 30:
+            conversation_history[user_ip] = conversation_history[user_ip][-30:]
+
+        last_message_time[user_ip] = datetime.now()
 
         return jsonify({
             "reply": reply,
@@ -190,5 +216,3 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
-
-
