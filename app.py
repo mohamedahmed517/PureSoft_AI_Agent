@@ -112,7 +112,7 @@ def gemini_chat(user_message, image_b64=None):
             mood_prompt = "إبدأ المحادثة بسؤاله: \"مزاجك إيه النهاردة؟\" وبعدين كمل عادي."
 
                 full_message = f"""
-                أنت عبدالله، صاحب محل لبس شيك في {city}، بتتكلم عامية مصرية طبيعية ومرحة.
+                محل لبس شيك في {city}، بتتكلم عامية مصرية طبيعية ومرحة.
                 
                 الجو النهاردة: {today_temp}°C
                 
@@ -258,5 +258,6 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
 
 
