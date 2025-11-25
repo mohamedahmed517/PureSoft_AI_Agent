@@ -79,7 +79,7 @@ conversation_history = defaultdict(list)
 def gemini_chat(user_message="", image_b64=None):
     try:
         user_ip = get_user_ip()
-        location = get_location(user_ip) or {"city": "القاهرة", "lat": 30.04, "lon": 31.23}
+        location = get_location(user_ip) or {"city": "لم يحدد", "lat": 30.04, "lon": 31.23}
         city = location["city"]
         today_temp = fetch_weather(location["lat"], location["lon"])
 
@@ -193,4 +193,5 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
 
