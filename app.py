@@ -9,8 +9,8 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
 import google.generativeai as genai
-from datetime import date, timedelta
 from flask import Flask, request, jsonify
+from datetime import date, timedelta, datetime 
 
 load_dotenv()
 
@@ -87,15 +87,14 @@ def fetch_weather(lat, lon):
         print(f"Weather error: {e}")
         return None
 
+# ==================== Memory ====================
 conversation_history = defaultdict(list)
 user_disabled_products = set()
-last_message_time = {}
 user_mood_asked = set()
 
 def gemini_chat(user_message, image_b64=None):
     try:
         user_ip = get_user_ip()
-
         today_temp = round((weather_data["temperature_2m_max"][0] + weather_data["temperature_2m_min"][0]) / 2, 1)
 
         products_text = "المنتجات المتاحة (ترشح من دول بس وما تطلعش حاجة برا القايمة):\n"
@@ -104,7 +103,6 @@ def gemini_chat(user_message, image_b64=None):
             price = row.get('price') or row.get('السعر') or row.iloc[1]
             cat = str(row.get('category') or row.get('الكاتيجوري') or row.get('القسم') or row.iloc[2] if len(row) > 2 else "غير محدد").strip()
             id_ = row.get('id') or row.get('product_id') or row.iloc[3] if len(row) > 3 else "unknown"
-
             products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | اللينك: https://afaq-stores.com/product-details/{id_}\n"
 
         show_products = user_ip not in user_disabled_products
@@ -115,31 +113,32 @@ def gemini_chat(user_message, image_b64=None):
 
         full_message = f"""
         أنت شاب مصري اسمه "عبدالله" (أو عبدو)، صاحب محل لبس شيك في {city}، بتتكلم عامية مصرية خفيفة وطبيعية جدًا، مرح، ودود، وبتفهم في الموضة.
-        
+
         الجو في {city} النهاردة: {today_temp}°C
-        
+
         لو اليوزر قال أي حاجة زي "مش عايز منتجات" أو "بس بشوف" أو "مش هاشتري دلوقتي" → متعرضش أي منتج نهائي لحد ما يقول صراحة "رشحلي" أو "عايز اشتري".
-        
+
         المنتجات المتاحة (ترشح من دول بس لو مسموح):
         {products_text if show_products else "اليوزر حاليًا مش عايز يشوف منتجات"}
-        
+
         المحادثة السابقة:
         {chr(10).join([text for role, text in conversation_history[user_ip][-10:]])}
-        
+
         اليوزر بيقول دلوقتي: {user_message or "فيه صورة مرفوعة"}
-        
+
         ≫≫ تعليمات مهمة جدًا ≪≪
         {mood_prompt}
-        
-        - لو رفع صورة → قوله: "ثانية بس أشوف الصورة... الله ينور! طب لو عندك صورة تانية للي في دماغك ابعتها وأنا أجيبلك زيها بالظبط"
+
+        - لو رفع صورة هو بيسأل عن منتج → قوله: "ثانية بس أشوف الصورة... الله ينور! طب لو عندك صورة تانية للي في دماغك ابعتها وأنا أجيبلك زيها بالظبط"
         - لو قال "غالي" أو "مش هينفع" → اعمل فصال مصري: "طب قوللي ميزانيتك كام وأنا أجيبلك حاجة تليق بيك" أو "خلاص لو هتاخد اتنين نعملك خصم حلو"
         - لو محتار بين اتنين → قوله: "طب أنا لو مكانك هاخد كذا، لأنه بيلبس أكتر وبيخسس كمان"
-        - لو سكت كتير → ردود زي: "لسه معايا ولا دخلت نام؟ 😂" أو "غمزت ولا لسه بتفكر؟"
+        - لو سكت كتير → ردود زي: "لسه معايا؟" أو "غمزت ولا لسه بتفكر؟"
         - لو أول مرة يكلمني → اسأله عن مزاجه.
         - ماتقولش "أنت:" أبدًا، خليك طبيعي 100%.
-        - متعترفش إنك بوت أبدًا → أنت عبدالله صاحب المحل.
+        - متعترفش إنك بوت أبدًا.
         - ردودك مرحة، خفيفة، ومصرية جدًا.
-        
+        - متردش بي اي ايموجي نهائي.
+
         رد دلوقتي بطريقة طبيعية كأنك بتكلم زبون دخل المحل.
         """.strip()
 
@@ -159,7 +158,7 @@ def gemini_chat(user_message, image_b64=None):
 
 @app.route("/")
 def home():
-    return "PureSoft AI Backend شغال 100% مع Gemini 2.0 Flash + عبدالله البائع المصري الأسطوري 🔥"
+    return "PureSoft AI Backend شغال 100% مع Gemini 2.0 Flash"
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -202,8 +201,6 @@ def chat():
         if len(conversation_history[user_ip]) > 30:
             conversation_history[user_ip] = conversation_history[user_ip][-30:]
 
-        last_message_time[user_ip] = datetime.now()
-
         return jsonify({
             "reply": reply,
             "city": city
@@ -215,4 +212,3 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
-
