@@ -5,10 +5,10 @@ import base64
 import requests
 import pandas as pd
 from PIL import Image
+import google.generativeai as genai
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
-import google.generativeai as genai
 from datetime import date, timedelta
 from flask import Flask, request, jsonify
 
@@ -17,7 +17,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# ==================== Gemini Setup ====================
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY مش موجود!")
@@ -28,65 +27,93 @@ MODEL = genai.GenerativeModel(
     generation_config={"temperature": 0.85, "max_output_tokens": 2048}
 )
 
-# ==================== CSV Data ====================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 csv_path = os.path.join(BASE_DIR, 'products.csv')
 CSV_DATA = pd.read_csv(csv_path)
 
-# ==================== IP & Weather (اختياري) ====================
-def get_location(ip):
+# ==================== IP & Weather ====================
+def get_user_ip():
+    headers = ["CF-Connecting-IP", "True-Client-IP", "X-Real-IP", "X-Forwarded-For"]
+    for h in headers:
+        val = request.headers.get(h)
+        if val:
+            ips = [i.strip() for i in val.replace('"', '').split(",")]
+            for ip in ips:
+                if ip and not ip.startswith(('127.', '10.', '172.', '192.168.')):
+                    return ip
+    return request.remote_addr or "127.0.0.1"
+
+def get_location(ip: str):
     try:
         r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=8)
         r.raise_for_status()
         d = r.json()
-        if d.get("city"):
-            return d.get("city")
+        if d.get("error") or not d.get("city") or not d.get("latitude") or not d.get("longitude"):
+            raise ValueError("بيانات ناقصة")
+        return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
     except:
-        pass
-    return "القاهرة"
+        try:
+            r = requests.get(f"https://ipwho.is/{ip}", timeout=8)
+            r.raise_for_status()
+            d = r.json()
+            if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
+                return None
+            return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
+        except Exception as e:
+            print(f"Location error: {e}")
+            return None
 
-def fetch_weather(city="Cairo"):
+def fetch_weather(lat, lon):
     try:
-        r = requests.get(f"https://wttr.in/{city}?format=%t", timeout=10)
-        temp = r.text.strip().replace("+", "").replace("C", "")
-        return float(temp) if temp.replace(".", "").isdigit() else 25
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&daily=temperature_2m_max,temperature_2m_min&timezone=auto"
+        r = requests.get(url, timeout=10)
+        data = r.json()["daily"]
+        temp = round((data["temperature_2m_max"][0] + data["temperature_2m_min"][0]) / 2, 1)
+        return temp
     except:
         return 25
 
 # ==================== Memory ====================
 conversation_history = defaultdict(list)
+user_disabled_products = set()
 
 # ==================== Gemini Chat ====================
 def gemini_chat(user_message="", image_b64=None):
     try:
-        city = get_location(request.remote_addr or "127.0.0.1")
-        today_temp = fetch_weather(city)
+        user_ip = get_user_ip()
+        location = get_location(user_ip)
+        city = location["city"]
+        today_temp = fetch_weather(location["lat"], location["lon"])
 
-        products_text = "المنتجات المتاحة (لازم ترشح من دول بس لو اليوزر بيسأل عن لبس):\n"
+        products_text = "المنتجات المتاحة (لازم ترشح من دول بس لو اليوزر عايز لبس):\n"
         for _, row in CSV_DATA.iterrows():
             name = str(row.get('name') or row.get('اسم المنتج') or row.get('product_name') or row.iloc[0]).strip()
             price = row.get('price') or row.get('السعر') or row.iloc[1]
-            cat = str(row.get('category') or row.get('الكاتيجوري') or row.get('القسم') or row.iloc[2] if len(row) > 2 else "").strip()
-            id_ = row.get('id') or row.get('product_id') or row.iloc[3] if len(row) > 3 else "unknown"
+            cat = str(row.get('category') or row.get('الكاتيجوري') or row.get('القسم') or row.iloc[2] if len(row)>2 else "").strip()
+            id_ = row.get('id') or row.get('product_id') or row.iloc[3] if len(row)>3 else "unknown"
             products_text += f"• {name} | السعر: {price} جنيه | الكاتيجوري: {cat} | ID: {id_}\n"
 
+        clothing_keywords = ["لبس", "تيشرت", "بنطلون", "جاكيت", "قميص", "هودي", "كارديجان", "كوتشي", "ترينج", "جينز", "رشح", "عايز", "زي", "نفس", "شبه", "شبه", "اقترح"]
+
         user_text_lower = user_message.lower() if user_message else ""
-        is_clothing_related = any(word in user_text_lower for word in ["لبس", "تيشرت", "بنطلون", "جاكيت", "قميص", "هودي", "كارديجان", "كوتشي", "ترينج", "جينز", "رشح", "عايز", "نفس", "زي"])
+        is_clothing_request = any(word in user_text_lower for word in clothing_keywords)
 
         full_message = f"""
-أنت شاب مصري بتتكلم عامية مصرية طبيعية وودودة جدًا، بتعرف تحلل صور وتتكلم عن لبس كويس.
+أنت شاب مصري بتتكلم عامية مصرية طبيعية وودودة جدًا، بتعرف تحلل صور وبتفهم في الموضة كويس.
 
-الجو النهاردة في {city}: {today_temp}°C
+الجو في {city} النهاردة: {today_temp}°C
 
-المنتجات اللي ممكن ترشحها (لازم تنسخ الاسم بالظبط من غير تغيير):
+المنتجات اللي ممكن ترشحها (لازم تنسخ الاسم بالحرف من غير أي تغيير):
 {products_text}
 
 المحادثة السابقة:
-{chr(10).join([t for _, t in conversation_history[request.remote_addr or "unknown"][-8:]])}
+{chr(10).join([t for _, t in conversation_history[user_ip][-10:]])}
 
-اليوزر{( " بيقول: " + user_message) if user_message else " مرفوع صورة بس"}
+اليوزر بيقول: {user_message or "فيه صورة مرفوعة"}
 
-لو اليوزر بيسأل عن لبس أو عايز اقتراح (زي "رشحلي" أو "عايز جاكيت" أو "نفس ده") → لازم ترشح منتجات من القايمة فوق بنفس التنسيق ده بالظبط:
+≫≫ قواعد صارمة ≪≪
+
+- لو اليوزر بيسأل عن لبس أو عايز اقتراح (كلمات زي رشحلي، عايز، نفس، زي...) → لازم ترشح منتجات من القايمة فوق بالتنسيق ده بالظبط:
 
 كارديجان صوف خفيف بيج
 السعر: 320 جنيه
@@ -98,16 +125,16 @@ def gemini_chat(user_message="", image_b64=None):
 الكاتيجوري: لبس خريفي
 اللينك: https://afaq-stores.com/product-details/1011
 
-ممنوع منعًا باتًا تغير اسم المنتج أو تكتب "لبس خريفي" كاسم أو تختصر.
+ممنوع تغير ولا حرف في اسم المنتج.
 
-لو اليوزر مرفوع صورة بس أو بيسأل حاجة عادية (مش عن لبس) → حلل الصورة ورد رد طبيعي من غير ما تجيب منتجات خالص.
+- لو اليوزر مرفوع صورة بس أو بيسأل حاجة عادية (مش عن لبس) → حلل الصورة ورد رد طبيعي من غير ما تجيب أي منتج خالص.
 
-لو اليوزر بيسأل عن لبس + مرفوع صورة → حلل الصورة وبعدين رشح منتجات بنفس التنسيق.
+- لو رفع صورة + كلام عن لبس → حلل الصورة الأول وبعدين رشح منتجات بالتنسيق أعلاه.
 
 - ردك عامية مصرية طبيعية 100%
 - متستخدمش إيموجي نهائي
 - متكتبش إنك بوت أبدًا
-- لو رفع صورة → ابدأ بـ "ثانية بس أشوف الصورة..."
+- لو فيه صورة → ابدأ بـ "ثانية بس أشوف الصورة..."
 
 رد دلوقتي.
 """.strip()
@@ -134,7 +161,7 @@ def home():
 @app.route("/api/chat", methods=["POST"])
 def chat():
     try:
-        user_ip = request.remote_addr or "unknown"
+        user_ip = get_user_ip()
         user_message = request.form.get("message", "").strip()
         image_file = request.files.get("image")
         image_b64 = None
@@ -142,8 +169,8 @@ def chat():
         if image_file:
             if not image_file.filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                 return jsonify({"error": "نوع الصورة مش مدعوم"}), 400
-            if image_file.content_length > 5 * 1024 * 1024:
-                return jsonify({"error": "الصورة كبيرة أوي"}), 400
+            if image_file.content_length > 5*1024*1024:
+                return jsonify({"error": "الصورة كبيرة"}), 400
             image_b64 = base64.b64encode(image_file.read()).decode('utf-8')
 
         if not user_message and not image_b64:
