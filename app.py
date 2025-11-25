@@ -109,7 +109,7 @@ def gemini_chat(user_message, image_b64=None):
 
         mood_prompt = ""
         if user_ip not in user_mood_asked and len(conversation_history[user_ip]) == 0:
-            mood_prompt = "إبدأ المحادثة بسؤاله: \"مزاجك إيه النهاردة؟ عايز لبس شيك ولا كاجوال؟\" وبعدين كمل عادي."
+            mood_prompt = "إبدأ المحادثة بسؤاله: \"مزاجك إيه النهاردة؟\" وبعدين كمل عادي."
 
         full_message = f"""
         أنت شاب مصري اسمه "عبدالله" (أو عبدو)، صاحب محل لبس شيك في {city}، بتتكلم عامية مصرية خفيفة وطبيعية جدًا، مرح، ودود، وبتفهم في الموضة.
@@ -138,6 +138,7 @@ def gemini_chat(user_message, image_b64=None):
         - متعترفش إنك بوت أبدًا.
         - ردودك مرحة، خفيفة، ومصرية جدًا.
         - متردش بي اي ايموجي نهائي.
+        - متقولش اي القاب غير حضرتك و بس
 
         رد دلوقتي بطريقة طبيعية كأنك بتكلم زبون دخل المحل.
         """.strip()
@@ -212,4 +213,5 @@ def chat():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+
 
