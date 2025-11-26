@@ -4,13 +4,11 @@ import base64
 import requests
 import pandas as pd
 from PIL import Image
-import google.generativeai as genai
 from flask_cors import CORS
 from dotenv import load_dotenv
 from collections import defaultdict
+import google.generativeai as genai
 from flask import Flask, request, jsonify
-
-# ←←← إضافة جديدة (سطرين بس)
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 
 load_dotenv()
@@ -25,7 +23,6 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ←←← تعديل بسيط جدًا: أضفنا safety_settings فقط
 safety_settings = [
     {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
     {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
@@ -36,7 +33,7 @@ safety_settings = [
 MODEL = genai.GenerativeModel(
     'gemini-2.0-flash',
     generation_config={"temperature": 0.85, "max_output_tokens": 2048},
-    safety_settings=safety_settings        # ←←← السطر الوحيد اللي زاد هنا
+    safety_settings=safety_settings
 )
 
 # ==================== Load CSV ====================
