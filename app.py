@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 from collections import defaultdict
 from flask import Flask, request, jsonify
 
+# ←←← إضافة جديدة (سطرين بس)
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -21,9 +24,19 @@ if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY مش موجود في .env")
 
 genai.configure(api_key=GEMINI_API_KEY)
+
+# ←←← تعديل بسيط جدًا: أضفنا safety_settings فقط
+safety_settings = [
+    {"category": HarmCategory.HARM_CATEGORY_HARASSMENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_HATE_SPEECH, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+    {"category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, "threshold": HarmBlockThreshold.BLOCK_NONE},
+]
+
 MODEL = genai.GenerativeModel(
     'gemini-2.0-flash',
-    generation_config={"temperature": 0.85, "max_output_tokens": 2048}
+    generation_config={"temperature": 0.85, "max_output_tokens": 2048},
+    safety_settings=safety_settings        # ←←← السطر الوحيد اللي زاد هنا
 )
 
 # ==================== Load CSV ====================
@@ -43,16 +56,25 @@ def get_user_ip():
                     return ip
     return request.remote_addr or "127.0.0.1"
 
-def get_location(ip):
+def get_location(ip: str):
     try:
         r = requests.get(f"https://ipapi.co/{ip}/json/", timeout=8)
         r.raise_for_status()
         d = r.json()
-        if d.get("city") and d.get("latitude") and d.get("longitude"):
-            return {"city": d["city"], "lat": d["latitude"], "lon": d["longitude"]}
+        if d.get("error") or not d.get("city") or not d.get("latitude") or not d.get("longitude"):
+            raise ValueError("بيانات ناقصة")
+        return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
     except:
-        pass
-    return {"city": "القاهرة", "lat": 30.04, "lon": 31.23}
+        try:
+            r = requests.get(f"https://ipwho.is/{ip}", timeout=8)
+            r.raise_for_status()
+            d = r.json()
+            if not d.get("city") or not d.get("latitude") or not d.get("longitude"):
+                return None
+            return {"city": d.get("city"), "lat": d.get("latitude"), "lon": d.get("longitude")}
+        except Exception as e:
+            print(f"Location error: {e}")
+            return None
 
 def fetch_weather(lat, lon):
     try:
@@ -61,8 +83,9 @@ def fetch_weather(lat, lon):
         data = r.json()["daily"]
         temp = round((data["temperature_2m_max"][0] + data["temperature_2m_min"][0]) / 2, 1)
         return temp
-    except:
-        return 25
+    except Exception as e:
+        print(f"Weather error: {e}")
+        return None
 
 # ==================== Memory ====================
 conversation_history = defaultdict(list)
@@ -75,7 +98,6 @@ def gemini_chat(user_message="", image_b64=None):
         city = location["city"]
         today_temp = fetch_weather(location["lat"], location["lon"])
 
-        # بناء قائمة المنتجات من العمود الصحيح product_name_ar
         products_text = "المنتجات المتاحة (ممنوع تغيير ولا حرف في الاسم أبدًا):\n"
         for _, row in CSV_DATA.iterrows():
             name = str(row['product_name_ar']).strip()
@@ -123,7 +145,6 @@ def gemini_chat(user_message="", image_b64=None):
 - تخترع اسم جديد أبدًا
 
 لو اليوزر رفع صورة عادية أو سأل حاجة مش عن منتجات → حلل الصورة ورد طبيعي من غير منتجات.
-
 لو رفع صورة + كلام عن لبس أو عناية → حلل الصورة الأول وبعدين رشح بالتنسيق أعلاه.
 
 - ردك عامية مصرية 100%
@@ -140,6 +161,9 @@ def gemini_chat(user_message="", image_b64=None):
             response = MODEL.generate_content([full_message, img])
         else:
             response = MODEL.generate_content(full_message)
+
+        if not getattr(response, "candidates", None):
+            raise ValueError("تم حظر الرد من جوجل (candidates empty)")
 
         reply = response.text.strip()
         return reply
